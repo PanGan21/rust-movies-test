@@ -1,8 +1,10 @@
+mod trie;
 pub mod types;
 
 use rand::Rng;
 use std::io::Read;
 use std::{collections::HashSet, fs::File};
+use trie::GenreTrie;
 
 use serde::{Deserialize, Serialize};
 
@@ -31,53 +33,38 @@ pub fn get_filtered_movies(genres: Vec<types::Genre>) -> Vec<types::Movie> {
         return vec![random_movie.clone()];
     }
 
+    // Build a Genre Trie and insert joined genres
+    let mut genre_trie = GenreTrie::new();
+    let mut sorted_genres: Vec<String> = genres.iter().map(|genre| genre.to_string()).collect();
+    sorted_genres.sort();
+    genre_trie.insert(&sorted_genres.join(""));
+
     let mut selected_movie_ids: HashSet<u32> = HashSet::new();
     let mut matching_movies: Vec<types::Movie> = Vec::new();
 
-    // Filter movies that match all provided genres
-    let all_genres_matched: Vec<&str> = genres.iter().map(|genre| genre.as_str()).collect();
-    let matching_movies_all_genres: Vec<&types::Movie> = db
-        .movies
-        .iter()
-        .filter(|movie| {
-            movie
-                .genres
-                .iter()
-                .all(|genre| all_genres_matched.contains(&genre.as_str()))
-        })
-        .collect();
+    for movie in &db.movies {
+        let joined_genres = movie
+            .genres
+            .iter()
+            .map(|genre| genre.to_string())
+            .collect::<Vec<_>>()
+            .join("");
 
-    // Add movies matching all genres to the result
-    for movie in matching_movies_all_genres {
-        if !selected_movie_ids.contains(&movie.id) {
+        let has_extra_genres = movie.genres.iter().any(|g| !genres.contains(g));
+        let is_subset = movie.genres.iter().all(|g| genres.contains(g));
+
+        if (genre_trie.contains(&joined_genres) || (is_subset && !has_extra_genres))
+            && !selected_movie_ids.contains(&movie.id)
+        {
             selected_movie_ids.insert(movie.id);
             matching_movies.push(movie.clone());
         }
     }
 
-    let matching_movies_exact_genres: Vec<&types::Movie> = db
-        .movies
-        .iter()
-        .filter(|movie| {
-            movie.genres.len() == genres.len()
-                && movie.genres.iter().all(|genre| genres.contains(genre))
-        })
-        .collect();
-
-    // Add movies matching the provided genres exactly to the result
-    for movie in matching_movies_exact_genres {
-        if !selected_movie_ids.contains(&movie.id) {
-            selected_movie_ids.insert(movie.id);
-            matching_movies.push(movie.clone());
-        }
-    }
-
-    // Sort the matching movies by title
+    // Sort the matching movies by the number of matching genres in descending order
     matching_movies.sort_by(|a, b| {
         let a_match_count = a.genres.iter().filter(|&g| genres.contains(g)).count();
         let b_match_count = b.genres.iter().filter(|&g| genres.contains(g)).count();
-
-        // Sort by the number of matching genres in descending order
         b_match_count.cmp(&a_match_count)
     });
 
